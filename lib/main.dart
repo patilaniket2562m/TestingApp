@@ -2,17 +2,87 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_options.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:firebase_analytics/firebase_analytics.dart';
+
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+FlutterLocalNotificationsPlugin();
+
+/// 🔥 BACKGROUND HANDLER (MANDATORY for kill state)
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+  print("🔥 Background message: ${message.notification?.title}");
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-
-
 
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
+  /// 🔥 REQUIRED
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+  /// 🔥 Analytics (IMPORTANT FIX)
+  FirebaseAnalytics analytics = FirebaseAnalytics.instance;
+
+  await setupNotifications();
+
   runApp(const MyApp());
+}
+
+Future<void> setupNotifications() async {
+  /// 🔔 Local notification init
+  const AndroidInitializationSettings androidSettings =
+  AndroidInitializationSettings('@mipmap/ic_launcher');
+
+  const InitializationSettings settings =
+  InitializationSettings(android: androidSettings);
+
+  await flutterLocalNotificationsPlugin.initialize(
+    settings,
+    onDidReceiveNotificationResponse: (response) {
+      print("Notification clicked!");
+    },
+  );
+
+  FirebaseMessaging messaging = FirebaseMessaging.instance;
+
+  /// 🔥 Permission
+  await messaging.requestPermission();
+
+  /// 🔥 AUTO INIT (VERY IMPORTANT)
+  await messaging.setAutoInitEnabled(true);
+
+  /// 🔥 TOPIC SUBSCRIBE (for Firebase Console targeting)
+  await messaging.subscribeToTopic("all_users");
+
+  /// 🔥 TOKEN (for testing)
+  String? token = await messaging.getToken();
+  print("🔥 FCM TOKEN: $token");
+}
+
+/// 🔔 LOCAL NOTIFICATION (FOREGROUND)
+Future<void> showLocalNotification(String title, String body) async {
+  const AndroidNotificationDetails androidDetails =
+  AndroidNotificationDetails(
+    'channel_id',
+    'channel_name',
+    importance: Importance.max,
+    priority: Priority.high,
+  );
+
+  const NotificationDetails details =
+  NotificationDetails(android: androidDetails);
+
+  await flutterLocalNotificationsPlugin.show(
+    0,
+    title,
+    body,
+    details,
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -42,10 +112,26 @@ class _CalculatorPageState extends State<CalculatorPage> {
   @override
   void initState() {
     super.initState();
+
     fetchTitle();
+
+    /// 🔥 FOREGROUND (APP OPEN)
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      print("🔥 Foreground notification");
+
+      showLocalNotification(
+        message.notification?.title ?? "No Title",
+        message.notification?.body ?? "No Body",
+      );
+    });
+
+    /// 🔥 CLICK EVENT
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      print("🔥 User tapped notification");
+    });
   }
 
-  // 🔥 Only Firebase usage (get title)
+  /// 🔥 Firestore title fetch
   void fetchTitle() async {
     try {
       final doc = await FirebaseFirestore.instance
@@ -127,7 +213,7 @@ class _CalculatorPageState extends State<CalculatorPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(title), // 🔥 from Firebase
+        title: Text(title),
         backgroundColor: Colors.deepPurple,
       ),
       body: Column(
